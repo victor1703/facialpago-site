@@ -1,0 +1,111 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1,user-scalable=no" />
+  <title>FacialPago · Enrolar rostro</title>
+  <style>
+    :root { color-scheme: light dark; }
+    body { font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif; margin: 16px; }
+    .card { max-width: 560px; margin: 0 auto; padding: 16px; border: 1px solid #e5e7eb; border-radius: 12px; }
+    h2 { margin: 0 0 8px; }
+    p.hint { color: #6b7280; font-size: 14px; margin: 0 0 12px; }
+    button { padding: 12px 16px; border-radius: 10px; border: 0; cursor: pointer; font-weight: 600; }
+    .primary { background: #2563eb; color: #fff; }
+    .log { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; background:#f9fafb; padding:10px; border-radius:8px; margin-top:12px; word-break: break-all;}
+  </style>
+  <!-- FaceIO SDK (requerido en producción) -->
+  <script src="https://cdn.faceio.net/fio.js"></script>
+</head>
+<body>
+  <div class="card">
+    <h2>Enrolar rostro</h2>
+    <p class="hint">Asegurate de estar en HTTPS y de configurar tu <code>FACEIO_PUBLIC_ID</code>.</p>
+    <button class="primary" id="btn-enroll">Iniciar enrolamiento</button>
+    <div id="out" class="log" aria-live="polite"></div>
+  </div>
+
+  <script>
+    // ======= CONFIG =======
+    // REEMPLAZA ESTO por tu Public ID real de FaceIO
+    const FACEIO_PUBLIC_ID = "PON_AQUI_TU_PUBLIC_ID";
+    // Fallback cuando no estamos dentro de Flutter:
+    const FALLBACK_DEEPLINK = "facialpago://faceio/enrolled";
+
+    // ======= HELPERS =======
+    const hasFlutterBridge = () =>
+      typeof window.flutter_inappwebview !== "undefined" &&
+      typeof window.flutter_inappwebview.callHandler === "function";
+
+    const log = (msg) => {
+      const el = document.getElementById("out");
+      el.textContent = (el.textContent ? el.textContent + "\n" : "") + msg;
+      console.log(msg);
+    };
+
+    function sendSuccess(facialId) {
+      log("✅ Éxito → facialId=" + facialId);
+      if (hasFlutterBridge()) {
+        window.flutter_inappwebview.callHandler("faceioSuccess", facialId);
+      } else {
+        // Redirige a tu app por deeplink si está instalada
+        try {
+          const url = new URL(FALLBACK_DEEPLINK);
+          url.searchParams.set("facialId", facialId);
+          window.location.href = url.toString();
+        } catch (_) {
+          alert("Facial ID: " + facialId);
+        }
+      }
+    }
+
+    function sendError(err) {
+      const msg = (err && err.message) ? err.message : String(err);
+      log("❌ Error → " + msg);
+      if (hasFlutterBridge()) {
+        window.flutter_inappwebview.callHandler("faceioError", msg);
+      } else {
+        alert("Error: " + msg);
+      }
+    }
+
+    // ======= ENROLL =======
+    async function enroll() {
+      // Validaciones previas
+      if (!window.faceIO) { sendError("SDK faceIO no disponible."); return; }
+      if (!FACEIO_PUBLIC_ID || FACEIO_PUBLIC_ID.startsWith("PON_")) {
+        sendError("Configurá FACEIO_PUBLIC_ID con tu Public ID.");
+        return;
+      }
+      if (location.protocol !== "https:") {
+        sendError("FaceIO requiere HTTPS.");
+        return;
+      }
+
+      try {
+        const fio = new faceIO(FACEIO_PUBLIC_ID);
+        // Opciones: ajustá según tu plan/políticas
+        const result = await fio.enroll({
+          locale: "es",
+          payload: { purpose: "payments" },
+          // options: {...}
+        });
+        const facialId = result?.facialId || result?.facialid || "";
+        if (!facialId) throw new Error("No se recibió facialId del SDK");
+        sendSuccess(facialId);
+      } catch (err) {
+        // Mapeo suave de errores comunes
+        if (err && typeof err === "object") {
+          if (err.code === "PERMISSION_REFUSED") sendError("Permiso de cámara denegado.");
+          else if (err.code === "FACE_NOT_FOUND") sendError("No se detectó rostro, intentá de nuevo.");
+          else sendError(err);
+        } else {
+          sendError(err);
+        }
+      }
+    }
+
+    document.getElementById("btn-enroll").addEventListener("click", enroll);
+  </script>
+</body>
+</html>
